@@ -23,7 +23,7 @@ permissions:
   id-token: write   # cosign keyless (OIDC)
 
 env:
-  REGISTRY:         ghcr.io
+  GHCR_REGISTRY:    ghcr.io
   IMAGE_NAMESPACE:  nucleospl/harbor-arm64-images
   HARBOR_VERSION:   ${{ inputs.harbor_version }}
   HARBOR_SHA:       ${{ inputs.harbor_sha }}
@@ -43,7 +43,7 @@ jobs:
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ${{ env.GHCR_REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
@@ -77,8 +77,12 @@ jobs:
       #    (DockerHub nie ma arm64 Harbor base images).
       - name: Build Harbor Docker images
         working-directory: harbor-src
+        # Jawnie ustawiamy Harbor-internal vars żeby żadna zmienna środowiskowa
+        # (np. REGISTRY, REGISTRYSERVER) nie wyciekła z naszego workflow do Makefile.
         run: |
           make build \
+            IMAGENAMESPACE=goharbor \
+            REGISTRYSERVER=goharbor \
             VERSIONTAG="${{ env.HARBOR_VERSION }}" \
             BASEIMAGETAG="${{ env.HARBOR_VERSION }}" \
             PULL_BASE_FROM_DOCKERHUB=false \
@@ -86,7 +90,7 @@ jobs:
 
       - name: Re-tag images to GHCR namespace
         run: |
-          NS="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}"
+          NS="${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}"
           VER="${{ env.HARBOR_VERSION }}"
           declare -A IMAGES=(
             ["harbor-core"]="harbor-core"
@@ -143,7 +147,7 @@ jobs:
             harbor-log harbor-registryctl harbor-exporter
             nginx-photon registry-photon trivy-adapter-photon prepare
           )
-          NS="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}"
+          NS="${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}"
           VER="${{ env.HARBOR_VERSION }}"
 
           for img in "${IMAGES[@]}"; do
@@ -168,7 +172,7 @@ jobs:
             harbor-log harbor-registryctl harbor-exporter
             nginx-photon registry-photon trivy-adapter-photon prepare
           )
-          NS="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}"
+          NS="${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}"
           VER="${{ env.HARBOR_VERSION }}"
 
           for img in "${IMAGES[@]}"; do
@@ -186,7 +190,7 @@ jobs:
             "last_built":     "${{ env.HARBOR_VERSION }}",
             "last_built_sha": "${{ env.HARBOR_SHA }}",
             "built_at":       "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "registry":       "${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}",
+            "registry":       "${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}",
             "images": [
               "harbor-core", "harbor-jobservice", "harbor-portal",
               "harbor-db", "harbor-log", "harbor-registryctl",
