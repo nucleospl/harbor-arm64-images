@@ -1,0 +1,12 @@
+{
+  "last_built":     "none",
+  "last_built_sha": "none",
+  "built_at":       "never",
+  "registry":       "ghcr.io/nucleospl/harbor-arm64-images",
+  "images": [
+    "harbor-core", "harbor-jobservice", "harbor-portal",
+    "harbor-db", "harbor-log", "harbor-registryctl",
+    "harbor-exporter", "nginx-photon", "registry-photon",
+    "trivy-adapter-photon", "prepare"
+  ]
+}

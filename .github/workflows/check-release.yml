@@ -1,0 +1,91 @@
+name: Check Harbor Upstream Release
+
+# Sprawdza co 6h czy pojawił się nowy release Harbor.
+# Jeśli tak — triggeruje build.yml z pinem na konkretny commit SHA.
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  actions: write   # potrzebne do gh workflow run
+
+jobs:
+  check:
+    name: Check for new Harbor release
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.compare.outputs.new_version }}
+      version:     ${{ steps.resolve.outputs.version }}
+      sha:         ${{ steps.resolve.outputs.sha }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve latest Harbor release to commit SHA
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Pobierz najnowszy release (nie pre-release)
+          LATEST=$(curl -sf \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/goharbor/harbor/releases/latest" \
+            | jq -r '.tag_name')
+
+          echo "Latest upstream: ${LATEST}"
+
+          # Tagi Harbor są annotated — dwa kroki do commita
+          REF_JSON=$(curl -sf \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/goharbor/harbor/git/ref/tags/${LATEST}")
+
+          OBJ_TYPE=$(echo "$REF_JSON" | jq -r '.object.type')
+          OBJ_SHA=$(echo  "$REF_JSON" | jq -r '.object.sha')
+
+          if [ "$OBJ_TYPE" = "tag" ]; then
+            # annotated tag → wyciągnij commit SHA z obiektu tagu
+            COMMIT_SHA=$(curl -sf \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/goharbor/harbor/git/tags/${OBJ_SHA}" \
+              | jq -r '.object.sha')
+          else
+            COMMIT_SHA="$OBJ_SHA"
+          fi
+
+          echo "version=${LATEST}"     >> "$GITHUB_OUTPUT"
+          echo "sha=${COMMIT_SHA}"     >> "$GITHUB_OUTPUT"
+          echo "Pinned SHA: ${COMMIT_SHA}"
+
+      - name: Compare with last built version
+        id: compare
+        run: |
+          LAST_BUILT=$(jq -r '.last_built // "none"' versions.json 2>/dev/null || echo "none")
+          LATEST="${{ steps.resolve.outputs.version }}"
+
+          echo "Last built : ${LAST_BUILT}"
+          echo "Latest     : ${LATEST}"
+
+          if [ "$LATEST" != "$LAST_BUILT" ]; then
+            echo "new_version=true"  >> "$GITHUB_OUTPUT"
+          else
+            echo "new_version=false" >> "$GITHUB_OUTPUT"
+            echo "Already up-to-date."
+          fi
+
+      - name: Dispatch build workflow
+        if: steps.compare.outputs.new_version == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run build.yml \
+            --repo "${{ github.repository }}" \
+            -f harbor_version="${{ steps.resolve.outputs.version }}" \
+            -f harbor_sha="${{ steps.resolve.outputs.sha }}"
+          echo "Dispatched build for ${{ steps.resolve.outputs.version }} @ ${{ steps.resolve.outputs.sha }}"
