@@ -92,9 +92,12 @@ jobs:
         run: |
           NS="${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}"
           VER="${{ env.HARBOR_VERSION }}"
-          # Dynamicznie wykryj co faktycznie zostało zbudowane
-          BUILT=$(docker images --format '{{.Repository}}' \
-            | grep "^goharbor/" | sed 's|goharbor/||' | sort -u)
+          # Wykryj obrazy runtime: mają tag wersji i nie są pośrednimi base images
+          BUILT=$(docker images --format '{{.Repository}}:{{.Tag}}' \
+            | grep "^goharbor/.*:${VER}$" \
+            | grep -v "\-base:" \
+            | sed "s|goharbor/||;s|:${VER}\$||" \
+            | sort -u)
           echo "Built images: ${BUILT}"
           for img in $BUILT; do
             docker tag "goharbor/${img}:${VER}" "${NS}/${img}:${VER}"
