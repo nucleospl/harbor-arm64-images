@@ -92,22 +92,16 @@ jobs:
         run: |
           NS="${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}"
           VER="${{ env.HARBOR_VERSION }}"
-          declare -A IMAGES=(
-            ["harbor-core"]="harbor-core"
-            ["harbor-jobservice"]="harbor-jobservice"
-            ["harbor-portal"]="harbor-portal"
-            ["harbor-db"]="harbor-db"
-            ["harbor-log"]="harbor-log"
-            ["harbor-registryctl"]="harbor-registryctl"
-            ["harbor-exporter"]="harbor-exporter"
-            ["nginx-photon"]="nginx-photon"
-            ["registry-photon"]="registry-photon"
-            ["trivy-adapter-photon"]="trivy-adapter-photon"
-            ["prepare"]="prepare"
-          )
-          for img in "${!IMAGES[@]}"; do
+          # Dynamicznie wykryj co faktycznie zostało zbudowane
+          BUILT=$(docker images --format '{{.Repository}}' \
+            | grep "^goharbor/" | sed 's|goharbor/||' | sort -u)
+          echo "Built images: ${BUILT}"
+          for img in $BUILT; do
             docker tag "goharbor/${img}:${VER}" "${NS}/${img}:${VER}"
+            echo "Tagged: goharbor/${img}:${VER} → ${NS}/${img}:${VER}"
           done
+          # Zapisz listę dla kolejnych kroków
+          echo "$BUILT" > /tmp/built_images.txt
 
       # ── 6. Skanowanie Trivy (przed pushem, lokalny obraz) ────────────────
       #    CRITICAL → fail buildu. HIGH → tylko raport (nie blokuje).
@@ -123,12 +117,8 @@ jobs:
       - name: Trivy scan — wszystkie obrazy (HIGH, tylko raport)
         continue-on-error: true
         run: |
-          IMAGES=(
-            harbor-core harbor-jobservice harbor-portal harbor-db
-            harbor-log harbor-registryctl harbor-exporter
-            nginx-photon registry-photon trivy-adapter-photon prepare
-          )
-          for img in "${IMAGES[@]}"; do
+          VER="${{ env.HARBOR_VERSION }}"
+          for img in $(cat /tmp/built_images.txt); do
             echo "=== Scanning ${img} ==="
             docker run --rm \
               -v /var/run/docker.sock:/var/run/docker.sock \
@@ -136,26 +126,19 @@ jobs:
               --severity HIGH \
               --ignore-unfixed \
               --no-progress \
-              "goharbor/${img}:${{ env.HARBOR_VERSION }}" || true
+              "goharbor/${img}:${VER}" || true
           done
 
       # ── 7. Push do GHCR ───────────────────────────────────────────────────
       - name: Push all images to GHCR
         run: |
-          IMAGES=(
-            harbor-core harbor-jobservice harbor-portal harbor-db
-            harbor-log harbor-registryctl harbor-exporter
-            nginx-photon registry-photon trivy-adapter-photon prepare
-          )
           NS="${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}"
           VER="${{ env.HARBOR_VERSION }}"
 
-          for img in "${IMAGES[@]}"; do
+          for img in $(cat /tmp/built_images.txt); do
             echo "Pushing ${NS}/${img}:${VER}"
             docker push "${NS}/${img}:${VER}"
-
-            # latest tag
-            docker tag "${NS}/${img}:${VER}" "${NS}/${img}:latest"
+            docker tag  "${NS}/${img}:${VER}" "${NS}/${img}:latest"
             docker push "${NS}/${img}:latest"
           done
 
@@ -167,16 +150,10 @@ jobs:
 
       - name: Sign images with cosign keyless
         run: |
-          IMAGES=(
-            harbor-core harbor-jobservice harbor-portal harbor-db
-            harbor-log harbor-registryctl harbor-exporter
-            nginx-photon registry-photon trivy-adapter-photon prepare
-          )
           NS="${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}"
           VER="${{ env.HARBOR_VERSION }}"
 
-          for img in "${IMAGES[@]}"; do
-            # Wyciągnij digest po pushu — nie używamy taga do podpisania
+          for img in $(cat /tmp/built_images.txt); do
             DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "${NS}/${img}:${VER}")
             echo "Signing ${DIGEST}"
             cosign sign --yes "${DIGEST}"
@@ -191,12 +168,7 @@ jobs:
             "last_built_sha": "${{ env.HARBOR_SHA }}",
             "built_at":       "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
             "registry":       "${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}",
-            "images": [
-              "harbor-core", "harbor-jobservice", "harbor-portal",
-              "harbor-db", "harbor-log", "harbor-registryctl",
-              "harbor-exporter", "nginx-photon", "registry-photon",
-              "trivy-adapter-photon", "prepare"
-            ]
+            "images": $(cat /tmp/built_images.txt | jq -R . | jq -sc .)
           }
           EOF
 
