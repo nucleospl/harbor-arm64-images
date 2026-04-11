@@ -71,27 +71,46 @@ jobs:
         run: make compile
 
       # ── 5. Budowanie obrazów Docker ───────────────────────────────────────
-      #    Harbor Makefile używa `docker build` bez platform flagi.
-      #    Ponieważ runner jest arm64, docker build produkuje arm64 obrazy natywnie.
+      #    Harbor Makefile używa REGISTRYSERVER jako ścieżki do Dockerfile (nie adresu registry!).
+      #    Budujemy z domyślną nazwą goharbor/... a potem re-tagujemy do GHCR.
       #    PULL_BASE_FROM_DOCKERHUB=false → buduje photon base images lokalnie
       #    (DockerHub nie ma arm64 Harbor base images).
       - name: Build Harbor Docker images
         working-directory: harbor-src
         run: |
           make build \
-            REGISTRYSERVER="${{ env.REGISTRY }}" \
-            REGISTRYPROJECTNAME="${{ env.IMAGE_NAMESPACE }}" \
             VERSIONTAG="${{ env.HARBOR_VERSION }}" \
             BASEIMAGETAG="${{ env.HARBOR_VERSION }}" \
             PULL_BASE_FROM_DOCKERHUB=false \
             PUSHBASEIMAGE=false
 
-      # ── 6. Skanowanie Trivy (przed pushem) ───────────────────────────────
+      - name: Re-tag images to GHCR namespace
+        run: |
+          NS="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}"
+          VER="${{ env.HARBOR_VERSION }}"
+          declare -A IMAGES=(
+            ["harbor-core"]="harbor-core"
+            ["harbor-jobservice"]="harbor-jobservice"
+            ["harbor-portal"]="harbor-portal"
+            ["harbor-db"]="harbor-db"
+            ["harbor-log"]="harbor-log"
+            ["harbor-registryctl"]="harbor-registryctl"
+            ["harbor-exporter"]="harbor-exporter"
+            ["nginx-photon"]="nginx-photon"
+            ["registry-photon"]="registry-photon"
+            ["trivy-adapter-photon"]="trivy-adapter-photon"
+            ["prepare"]="prepare"
+          )
+          for img in "${!IMAGES[@]}"; do
+            docker tag "goharbor/${img}:${VER}" "${NS}/${img}:${VER}"
+          done
+
+      # ── 6. Skanowanie Trivy (przed pushem, lokalny obraz) ────────────────
       #    CRITICAL → fail buildu. HIGH → tylko raport (nie blokuje).
-      - name: Trivy scan — harbor-core (reprezentatywny)
+      - name: Trivy scan — harbor-core (reprezentatywny, blokujący)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/harbor-core:${{ env.HARBOR_VERSION }}'
+          image-ref: 'goharbor/harbor-core:${{ env.HARBOR_VERSION }}'
           format: table
           exit-code: '1'
           ignore-unfixed: true
@@ -113,7 +132,7 @@ jobs:
               --severity HIGH \
               --ignore-unfixed \
               --no-progress \
-              "${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${img}:${{ env.HARBOR_VERSION }}" || true
+              "goharbor/${img}:${{ env.HARBOR_VERSION }}" || true
           done
 
       # ── 7. Push do GHCR ───────────────────────────────────────────────────
