@@ -192,51 +192,50 @@ jobs:
         run: |
           NS="${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}"
           VER="${{ env.HARBOR_VERSION }}"
-          BUILT=$(cat /tmp/built_images.txt)
+          SHA="${{ env.HARBOR_SHA }}"
 
-          # Zbuduj listę obrazów jako markdown
-          IMAGE_LIST=""
-          for img in $BUILT; do
-            IMAGE_LIST="${IMAGE_LIST}- \`${NS}/${img}:${VER}\`\n"
-          done
-
-          BODY="## Harbor ${VER} — ARM64 images
-
-Unofficial ARM64 (\`linux/arm64\`) images built from [goharbor/harbor@\`${{ env.HARBOR_SHA }}\`](https://github.com/goharbor/harbor/commit/${{ env.HARBOR_SHA }}).
-
-### Images
-
-$(printf '%b' "${IMAGE_LIST}")
-### Usage
-
-\`\`\`bash
-docker pull ${NS}/harbor-core:${VER}
-\`\`\`
-
-Or in Helm values:
-\`\`\`yaml
-image:
-  repository: ${NS}/harbor-core
-  tag: ${VER}
-\`\`\`
-
-### Verification (cosign)
-
-\`\`\`bash
-cosign verify \\
-  --certificate-identity-regexp=\"https://github.com/nucleospl/harbor-arm64-images/.*\" \\
-  --certificate-oidc-issuer=\"https://token.actions.githubusercontent.com\" \\
-  ${NS}/harbor-core:${VER}
-\`\`\`
-
-### Links
-
-- [Upstream release](https://github.com/goharbor/harbor/releases/tag/${VER})
-- [GHCR packages](https://github.com/orgs/nucleospl/packages?repo_name=harbor-arm64-images)
-"
+          # Zbuduj listę obrazów jako markdown i zapisz notes do pliku
+          {
+            echo "## Harbor ${VER} — ARM64 images"
+            echo ""
+            echo "Unofficial ARM64 (\`linux/arm64\`) images built from [goharbor/harbor@\`${SHA}\`](https://github.com/goharbor/harbor/commit/${SHA})."
+            echo ""
+            echo "### Images"
+            echo ""
+            while IFS= read -r img; do
+              echo "- \`${NS}/${img}:${VER}\`"
+            done < /tmp/built_images.txt
+            echo ""
+            echo "### Usage"
+            echo ""
+            echo '```bash'
+            echo "docker pull ${NS}/harbor-core:${VER}"
+            echo '```'
+            echo ""
+            echo "Or in Helm values:"
+            echo '```yaml'
+            echo "image:"
+            echo "  repository: ${NS}/harbor-core"
+            echo "  tag: ${VER}"
+            echo '```'
+            echo ""
+            echo "### Verification (cosign)"
+            echo ""
+            echo '```bash'
+            echo "cosign verify \\"
+            echo "  --certificate-identity-regexp=\"https://github.com/nucleospl/harbor-arm64-images/.*\" \\"
+            echo "  --certificate-oidc-issuer=\"https://token.actions.githubusercontent.com\" \\"
+            echo "  ${NS}/harbor-core:${VER}"
+            echo '```'
+            echo ""
+            echo "### Links"
+            echo ""
+            echo "- [Upstream release](https://github.com/goharbor/harbor/releases/tag/${VER})"
+            echo "- [GHCR packages](https://github.com/orgs/nucleospl/packages?repo_name=harbor-arm64-images)"
+          } > /tmp/release_notes.md
 
           gh release create "${VER}" \
             --repo "${{ github.repository }}" \
             --title "Harbor ${VER} ARM64" \
-            --notes "${BODY}" \
+            --notes-file /tmp/release_notes.md \
             --latest
