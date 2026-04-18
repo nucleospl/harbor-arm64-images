@@ -18,7 +18,7 @@ on:
         type: string
 
 permissions:
-  contents: write   # zapis versions.json
+  contents: write   # zapis versions.json + tworzenie GitHub Release
   packages: write   # push do GHCR
   id-token: write   # cosign keyless (OIDC)
 
@@ -184,3 +184,59 @@ jobs:
           git diff --cached --quiet \
             || git commit -m "chore: built Harbor ${{ env.HARBOR_VERSION }} arm64 [skip ci]"
           git push
+
+      # ── 10. GitHub Release ────────────────────────────────────────────────
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NS="${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}"
+          VER="${{ env.HARBOR_VERSION }}"
+          BUILT=$(cat /tmp/built_images.txt)
+
+          # Zbuduj listę obrazów jako markdown
+          IMAGE_LIST=""
+          for img in $BUILT; do
+            IMAGE_LIST="${IMAGE_LIST}- \`${NS}/${img}:${VER}\`\n"
+          done
+
+          BODY="## Harbor ${VER} — ARM64 images
+
+Unofficial ARM64 (\`linux/arm64\`) images built from [goharbor/harbor@\`${{ env.HARBOR_SHA }}\`](https://github.com/goharbor/harbor/commit/${{ env.HARBOR_SHA }}).
+
+### Images
+
+$(printf '%b' "${IMAGE_LIST}")
+### Usage
+
+\`\`\`bash
+docker pull ${NS}/harbor-core:${VER}
+\`\`\`
+
+Or in Helm values:
+\`\`\`yaml
+image:
+  repository: ${NS}/harbor-core
+  tag: ${VER}
+\`\`\`
+
+### Verification (cosign)
+
+\`\`\`bash
+cosign verify \\
+  --certificate-identity-regexp=\"https://github.com/nucleospl/harbor-arm64-images/.*\" \\
+  --certificate-oidc-issuer=\"https://token.actions.githubusercontent.com\" \\
+  ${NS}/harbor-core:${VER}
+\`\`\`
+
+### Links
+
+- [Upstream release](https://github.com/goharbor/harbor/releases/tag/${VER})
+- [GHCR packages](https://github.com/orgs/nucleospl/packages?repo_name=harbor-arm64-images)
+"
+
+          gh release create "${VER}" \
+            --repo "${{ github.repository }}" \
+            --title "Harbor ${VER} ARM64" \
+            --notes "${BODY}" \
+            --latest
