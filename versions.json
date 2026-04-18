@@ -1,7 +1,7 @@
 {
   "last_built":     "v2.15.0",
   "last_built_sha": "e2b5ce92728f86c4b02f6a9a667741c1e5b62678",
-  "built_at":       "2026-04-11T21:49:31Z",
+  "built_at":       "2026-04-18T09:18:15Z",
   "registry":       "ghcr.io/nucleospl/harbor-arm64-images",
   "images": ["harbor-core","harbor-db","harbor-exporter","harbor-jobservice","harbor-log","harbor-portal","harbor-registryctl","nginx-photon","prepare","redis-photon","registry-photon"]
 }
